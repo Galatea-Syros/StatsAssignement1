@@ -1,0 +1,203 @@
+---
+title: "Syrokosta_PT_LA1"
+output: html_document
+date: "2024-11-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+First we need to import all the necessary libraries 
+```{r imports}
+library(foreign)
+library(nortest)
+library(psych)
+library(car)
+library(Hmisc)
+library(sjPlot)
+library(agricolae)
+```
+
+## Question 1:
+Now we can read the data and insert them into a dataframe and take a quick look at them with the str command
+```{r q1}
+salary<-read.spss('salary.sav', to.data.frame=T)
+str(salary)
+
+```
+## Creating a custom function 
+Since we will be doing a lot of exploring different data in specific ways to ensure we can utilize certain tests it is worth creating a custom function that performs all the necessary data exploration and can use the appropriate tests.
+```{r custom function}
+# Define the custom function
+analyze_data <- function(data, test_value=0, exploratory=F) {
+  if (!is.numeric(data)) {
+    stop("Data must be numeric.")
+  }
+  # Step 1: Check normality using qqplots and histograms
+  par(mfrow = c(1, 2)) # Set up side-by-side plots
+  qqnorm(data, main = "QQ Plot") # QQ plot
+  qqline(data, col = "blue")     # QQ line
+  
+  hist(data, probability = TRUE, main = "Histogram with Density Curve", 
+       xlab = "Data", col = "lightgray")
+  curve(dnorm(x, mean = mean(data), sd = sd(data)), 
+        col = "blue", lwd = 2, add = TRUE)
+  
+   # Step 2: Check sample size
+  sample_size <- length(data)
+  cat("Sample size:", sample_size, "\n")
+  
+  # Step 3: Check symmetry
+  mean_val <- mean(data)
+  median_val <- median(data)
+  cat("The sample Mean is:", mean_val, "The sample Median is:", median_val, "\n")
+  asymmetry <- !(round(skew(data),0)==0)
+  if (asymmetry){
+    cat("The sample is asymmetricaly distributed", "\n")
+  } else{
+      cat("The sample is symmetricaly distributed", "\n")
+  }
+  # Step 4: Perform the lillieTest for normality for symmetrical distributions
+  if(!asymmetry){
+    lillie_result <- lillie.test(data)
+    cat("LillieTest p-value:", lillie_result$p.value, "\n")
+    is_normal <- lillie_result$p.value > 0.05
+  }else{is_normal<- FALSE}
+  
+  if (is_normal){
+    cat("The sample is normally distributed", "\n")
+  } else{
+      cat("The sample is not normally distributed", "\n")
+  }
+
+  # Step 5: Hypothesis testing
+  if (!exploratory){
+    if (is_normal || (sample_size > 50 && !asymmetry)) {
+      # Perform a t-test if data is normal or large symmetrical sample
+      cat("A t-test can be performed to examine if the null hypothesis should be rejected")
+      t_test_result <- t.test(data, mu = test_value)
+      cat("\nT-Test Result:\n")
+      print(t_test_result)
+    } else {
+      # Perform a Wilcox test if conditions are not met for t-test
+      cat("Since the conditions for performing a T-test wren't met a Wilcox test will be performed to examine if the null hypothesis should be rejected")
+      wilcox_test_result <- wilcox.test(data, mu = test_value)
+      cat("\nWilcox Test Result:\n")
+      print(wilcox_test_result)
+    }
+  }
+}
+```
+
+## Question 2:
+Now we want to differentiate the numeric data from the rest and proceed with the tests of normality
+```{r q2a}
+index <- sapply(salary, class) == "numeric"
+sal_num <- salary[index]
+head(sal_num)
+sal_num <- sal_num[,-1]
+for (i in 1:ncol(sal_num)){
+print(names(sal_num[i]))
+analyze_data(sal_num[,i],,TRUE)
+}
+```
+The beginning salary or salbeg seems to be asymmetrical and not normally distributed which is generally expected from a distribution of salaries in a company which tend to have a negative skew
+Time in the company interestingly enough seems to be symmetrical yet it is not normal with the "tails" of the distribution amassing quite a lot of the observations
+Age in the company is again asymmetrical and not normally distributed
+Current salary or salnow follows a similar asymmetrical and normal trend with the expected negate skew
+Education level or edlevel is actually a categoric variable that should have been removed but wasn't due to hasty coding, it is an interesting error so the ouput will be preserved here and corrected with a line of code after the commentary
+Finally the variable work is also asymmetrical with a large negative skew
+```{r q2b}
+sal_num <- subset(sal_num,select= -edlevel)
+```
+
+## Question 3:
+Now to assess if the beginning salary can be assumed to be 1000 we first need to understand how the beginning salary is distributed. From an exploratory analysis we can see that it diverges from normality and that the distribution is asymmetrical (mean<>median). Therefore the most appropriate test is Wilcox's test with H0 being Median=1000
+```{r q3}
+analyze_data(sal_num$salbeg,1000)
+```
+After looking at the results of the Wilcox test we have enough evidence to reject the H0 which means that we do not have evidence to assume that the beginning salary is 1000
+
+##Question 4:
+First we need to create the requested variable. Then to check for the average of that variable we first need to examine the extent to which the variable deviates from normalcy. There is a deviation from normalcy but the sample is large enough to allow us to utilize a t.test to check for the HO of the average being equal to 1 
+```{r q4}
+logsalchange<-log((sal_num$salnow-sal_num$salbeg))
+analyze_data(logsalchange,1)
+```
+After the test we don't have the evidence to reject the null hypothesis so we can assume the average of the generated variable logsalchange is equal to 1 logdollar. Now for the obvious question, what does that mean? salchange alone gives us the difference between the current and starting salay and can be understood as a measure of absolute salary growth. logasalchange is the natural logarithm of that measure. The average of logsalchange is the naturla logarithm of the geometric mean of salchange. Therefore we cannot reject that the geometric mean of the absolute change in salary for the employees is equal to e
+
+## Question 5:
+Here we need to start by dividing the sample to two subsets based on the employee's gender. After that we will examine the distribution of these subsets and examine if it diverts from normalcy. Then we will check the sample size of each subset to ensure it is sufficiently large for the following tests. Lastly we will examine how symmetric the distributions are to be in a position to judge if the average is an appropriate estimator for the differences between the samples.
+```{r q5a}
+men<-subset.data.frame(salary,sex=='MALES')
+women<-subset.data.frame(salary,sex=='FEMALES')
+analyze_data(men$salbeg,,TRUE)
+analyze_data(women$salbeg,,TRUE)
+
+cat("Both samples are of N>50 but none seems to be normally distributed nor symmetrical enough for the average to be a decent estimator of therefore we will check for differences between the medians using a Wilcoxon rank sum test")
+wilcox.test(men$salbeg,women$salbeg,paired=F)
+```
+The p value is extremely small so we reject the null hypothesis of the medians being the same and we can assume that there is a significant difference between the median beginning salaries of the two genders. To examine the nature of that difference we can create a boxplot of the beginning salary for each gender to further our analysis.
+```{r q5b}
+mfrow=c(1,1)
+boxplot(men$salbeg,women$salbeg,names=c("Men","Women"))
+```
+The box plot reveals that this significant change in beginning salaries tends to favor men who seem to have higher mean beginning salaries.
+
+
+## Question 6:
+Now we need to create the age groups and then calculate the variable relsal. Once we have the variable relsal we will examine it's distribution and diversion from normality. We will repeat the process for the relsal of each salary group. Finally, we will examine if there is a difference for the relsal among the age groups utilizing an Anova test.
+Before jumping to that analysis though it is worth understanding that relsal is. Relsal an indicator of relative salary growth since it's the relative change in salary from the beginning to the current salary while accounting for the time spent in the company. It can be understood an indicator of average year on year salary growth expressed as a percent of the eployee's current salary
+```{r q6}
+agecuts<-cut2(salary$age,,,3)
+relsal<-((sal_num$salnow-sal_num$salbeg)/sal_num$salnow)*(1/sal_num$time)
+analyze_data(relsal,,TRUE)
+#Now we need to check for similar variances to proceed with an anova analysis
+#The data doesn't appear to be perfectly normally distributed but it has a small enough departure from normality that the Leven test can account for. For larger departures from normality the Flinger test should be used.
+relsalbyage<-cbind.data.frame(agecuts,relsal)
+leveneTest(relsal~agecuts)
+#We don't have any reason to reject the homogenity of variances among the three groups and therefore we we can now perform the anova analysis
+anova1<-aov(formula=relsal~agecuts)
+summary(anova1)
+#and to double check that the assumptions of the anova test weren't violated we will quickly use our custom function to test the normality of the anova residuals
+analyze_data(anova1$residuals,,TRUE)
+```
+The p value of the anova test is extremely small therefore we reject the null hypothesis of the anova test that there is no significant differences in the relsal based on age groups.This means that we have reason to suspect that the age group influences the relative salary rise of the employee, the natue of that influence needs further analysis. We can get a quick idea of what the influence might be by creating a simple boxplot for the relsal of each age group
+```{r q6b}
+mfrow<-c(1,1)
+boxplot(relsal~agecuts)
+```
+It seems that employees in younger age groups tend to have a higher relsal which is to be expected since relsal is a measure of relative salary growth and therefore makes sense to be higher in the beginning of someone's career
+
+## Question 7:
+Here we need to idenitfy if there differences in relsal among the job categories. To begin we will repeat last questions process of checking the conditions for and (if applicable) performing an analysis of variance anova
+```{r q7a}
+leveneTest(relsal~salary$jobcat)
+fligner.test(relsal~salary$jobcat)
+anova2<-aov(formula=relsal~salary$jobcat)
+summary(anova2)
+```
+We can see from anova's exceptionally small p-value that there is a significant difference in relsal based on job category. Now to identify which ones differ we will proceed to a set of pairwise tests
+```{r q7b}
+#To start we will plot the confidence intervals to check for overlaps
+x<-relsal
+y<-salary$jobcat
+mfrow<-c(1,1)
+a<-0.01
+sdata <- split(x,y)
+means <- sapply( sdata,mean )
+sds <- sapply( split(x,y), sd )
+ns <- table(y)
+LB <- means + qnorm( a/2 ) * sds /sqrt(ns)
+UB <- means + qnorm( 1-a/2 ) * sds /sqrt(ns)
+nlev <- nlevels(y)
+errbar( levels(y), means, UB, LB ) 
+#And now we will proceed with a Tukey Honest Significance Difference test to examine the results further
+multiple<-TukeyHSD(anova2, conf.level = 0.95)
+round(multiple$`salary$jobcat`,3)
+```
+From the Tukey HSD Test results we can see which job categories differ significantly from each other with regards to salary. A smaller p adj value means a larger difference so the pairs that deviate most signifcantly from each other are  OFFICE TRAINEE-CLERICAL, COLLEGE TRAINEE-CLERICAL, MBA TRAINEE-CLERICAL,TECHNICAL-COLLEGE TRAINEE and TECHNICAL-MBA TRAINEE. A quick look to the relevant graph validates that there is a seemingly large distance between the salary ranges of these groups.  
+
+```{r q8}
+#This needs a Fischer test
+```
